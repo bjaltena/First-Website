@@ -1,0 +1,14 @@
+[flake8]
+max-line-length = 120
+ignore =
+    # H306: imports not in alphabetical order (time, os)
+    H306,
+    # W503 line break before binary operator
+    # https://www.python.org/dev/peps/pep-0008/#should-a-line-break-before-or-after-a-binary-operator
+    W503,
+    # see: https://github.com/PyCQA/pycodestyle/issues/373
+    E203,
+exclude =
+    .git,
+    __pycache__,
+    env,
