@@ -1,8 +1,10 @@
+import os
 import sqlite3
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from passlib.hash import sha256_crypt
 
-from forms import CourseForm
+from datatypes.forms import CourseForm
 
 
 def create_app():
@@ -15,7 +17,7 @@ def create_app():
     """
     app = Flask(__name__)
     app.config["app.json.compact"] = False
-    app.config["SECRET_KEY"] = "d0f48d217e6c459824e806a8caa3e8cdad96811b08063549"
+    app.config["SECRET_KEY"] = os.urandom(32)
 
     messages_list = [
         {"title": "Message One", "content": "Message One Content"},
@@ -32,26 +34,56 @@ def create_app():
         }
     ]
 
-    def get_db_connection():
-        conn = sqlite3.connect("database.db")
+    def get_db_connection(db_name):
+        conn = sqlite3.connect(db_name)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def get_post(post_id):
-        conn = get_db_connection()
+    def get_post(*, post_id: str):
+        conn = get_db_connection(db_name="databases/posts.db")
         post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
         conn.close()
         if post is None:
             abort(404)
         return post
 
+    def get_user(*, username: str):
+        conn = get_db_connection(db_name="databases/users.db")
+        user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        conn.close()
+        return user
+
+    def create_user(*, username: str, password: str, email: str):
+        conn = get_db_connection(db_name="databases/users.db")
+        conn.execute(
+            "INSERT INTO users (username, password, email) VALUES (?, ?, ?)",
+            (username, sha256_crypt.hash(secret=password), email),
+        )
+        conn.commit()
+        conn.close()
+
+    def edit_user(*, username: str, password: str, email: str):
+        conn = get_db_connection(db_name="databases/users.db")
+        conn.execute(
+            "UPDATE users SET password = ?, email = ? WHERE username = ?",
+            (sha256_crypt.hash(secret=password), email, username),
+        )
+        conn.commit()
+        conn.close()
+
+    def delete_user(*, username: str):
+        conn = get_db_connection(db_name="databases/users.db")
+        conn.execute("DELETE FROM users WHERE username = ?", (username,))
+        conn.commit()
+        conn.close()
+
     @app.errorhandler(404)
     def page_not_found(error):
-        return render_template("404.html"), 404
+        return render_template("404.html", error=error), 404
 
     @app.errorhandler(500)
     def internal_server_error(error):
-        return render_template("500.html"), 500
+        return render_template("500.html", error=error), 500
 
     @app.route("/up", methods=["GET"])
     def up_page():
@@ -78,7 +110,123 @@ def create_app():
     @app.route("/")
     @app.route("/index/")
     def index():
-        return render_template("index.html")
+        if not session.get("username"):
+            return redirect(url_for("login"))
+        else:
+            return render_template("index.html")
+
+    @app.route("/login/", methods=["GET", "POST"])
+    def login():
+        if request.method == "POST":
+            username = request.form["username"]
+            password = request.form["password"]
+
+            if not username:
+                flash("Username is required!")
+            elif not password:
+                flash("Password is required!")
+            else:
+                user_record = get_user(username=username)
+
+                if not user_record:
+                    flash(f"Username, {username}, was not found. Please try again!")
+                    return render_template("login.html")
+
+                same_password = False
+                if sha256_crypt.verify(secret=password, hash=user_record["password"]):
+                    same_password = True
+
+                if same_password:
+                    session["username"] = username
+                    return redirect(url_for("index"))
+                else:
+                    flash(f"Incorrect password for {username}. Please try again!")
+                    return render_template("login.html")
+
+        return render_template("login.html")
+
+    @app.route("/signup/", methods=["GET", "POST"])
+    def signup():
+        if request.method == "POST":
+            username = request.form["username"]
+            password = request.form["password"]
+            password_confirm = request.form["password_confirm"]
+            email = request.form["email"]
+
+            if not username:
+                flash("Username is required!")
+            elif not password:
+                flash("Password is required!")
+            elif not password_confirm:
+                flash("Password Confirmation is required!")
+            elif password != password_confirm:
+                flash("Password and Password Confirmation are not equal!")
+            elif not email:
+                flash("Email is required!")
+            elif "@" not in email or "." not in email:
+                flash("Please enter a valid email address!")
+            else:
+                user_record = get_user(username=username)
+
+                if user_record:
+                    flash(f"Username, {username}, is not available. Please try again!")
+                    return render_template("signup.html")
+
+                create_user(username=username, password=password, email=email)
+                session["username"] = username
+                return redirect(url_for("index"))
+
+        return render_template("signup.html")
+
+    @app.route("/logout/", methods=["GET"])
+    def logout():
+        session["username"] = None
+        return redirect(url_for("login"))
+
+    @app.route("/account/", methods=["GET"])
+    def account():
+        if not session.get("username"):
+            flash("No one is currently signed in!")
+            return redirect(url_for("index"))
+
+        user = get_user(username=session["username"])
+        return render_template("account.html", user=user)
+
+    @app.route("/user_edit/", methods=["GET", "POST"])
+    def user_edit():
+        user_record = get_user(username=session["username"])
+
+        if request.method == "POST":
+            password = request.form["password"]
+            password_confirm = request.form["password_confirm"]
+            email = request.form["email"]
+
+            if not password:
+                flash("Password is required!")
+            elif not password_confirm:
+                flash("Password Confirmation is required!")
+            elif password != password_confirm:
+                flash("Password and Password Confirmation are not equal!")
+            elif not email:
+                flash("Email is required!")
+            elif "@" not in email or "." not in email:
+                flash("Please enter a valid email address!")
+            else:
+
+                edit_user(username=user_record["username"], password=password, email=email)
+                return redirect(url_for("account"))
+
+        return render_template("user_edit.html", username=user_record["username"], email=user_record["email"])
+
+    @app.route("/user_delete/", methods=["POST"])
+    def user_delete():
+        if not session.get("username"):
+            flash("No one is currently signed in!")
+            return redirect(url_for("index"))
+
+        delete_user(username=session["username"])
+        session["username"] = None
+        return redirect(url_for("index"))
 
     @app.route("/about/")
     def about():
@@ -124,8 +272,8 @@ def create_app():
     def messages():
         return render_template("messages.html", messages=messages_list)
 
-    @app.route("/form/", methods=("GET", "POST"))
-    def form():
+    @app.route("/create_course/", methods=("GET", "POST"))
+    def create_course():
         form = CourseForm()
         if form.validate_on_submit():
             courses_list.append(
@@ -139,7 +287,7 @@ def create_app():
             )
             return redirect(url_for("courses"))
 
-        return render_template("form.html", form=form)
+        return render_template("create_course.html", form=form)
 
     @app.route("/courses/")
     def courses():
@@ -147,10 +295,10 @@ def create_app():
 
     @app.route("/posts/")
     def posts():
-        conn = get_db_connection()
-        posts = conn.execute("SELECT * FROM posts").fetchall()
+        conn = get_db_connection(db_name="databases/posts.db")
+        posts_data = conn.execute("SELECT * FROM posts").fetchall()
         conn.close()
-        return render_template("posts.html", posts=posts)
+        return render_template("posts.html", posts=posts_data)
 
     @app.route("/create_post/", methods=("GET", "POST"))
     def create_post():
@@ -163,7 +311,7 @@ def create_app():
             elif not content:
                 flash("Content is required!")
             else:
-                conn = get_db_connection()
+                conn = get_db_connection(db_name="databases/posts.db")
                 conn.execute("INSERT INTO posts (title, content) VALUES (?, ?)", (title, content))
                 conn.commit()
                 conn.close()
@@ -171,9 +319,9 @@ def create_app():
 
         return render_template("create_post.html")
 
-    @app.route("/posts/<int:id>/edit/", methods=("GET", "POST"))
-    def edit(id):
-        post = get_post(id)
+    @app.route("/posts/<int:post_id>/edit/", methods=("GET", "POST"))
+    def edit(post_id):
+        post = get_post(post_id=post_id)
 
         if request.method == "POST":
             title = request.form["title"]
@@ -186,19 +334,19 @@ def create_app():
                 flash("Content is required!")
 
             else:
-                conn = get_db_connection()
-                conn.execute("UPDATE posts SET title = ?, content = ?" " WHERE id = ?", (title, content, id))
+                conn = get_db_connection(db_name="databases/posts.db")
+                conn.execute("UPDATE posts SET title = ?, content = ?" " WHERE id = ?", (title, content, post_id))
                 conn.commit()
                 conn.close()
                 return redirect(url_for("posts"))
 
         return render_template("post_edit.html", post=post)
 
-    @app.route("/posts/<int:id>/delete/", methods=("POST",))
-    def delete(id):
-        post = get_post(id)
-        conn = get_db_connection()
-        conn.execute("DELETE FROM posts WHERE id = ?", (id,))
+    @app.route("/posts/<int:post_id>/delete/", methods=("POST",))
+    def delete(post_id):
+        post = get_post(post_id=post_id)
+        conn = get_db_connection(db_name="databases/posts.db")
+        conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         conn.commit()
         conn.close()
         flash('"{}" was successfully deleted!'.format(post["title"]))

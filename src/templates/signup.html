@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1>{% block title %} New User {% endblock %}</h1>
+    <form method="post">
+        <label for="title">Username</label>
+        <br>
+        <input type="text" name="username" placeholder="" value="{{ request.form['username'] }}"></input>
+        <br>
+
+        <label for="title">Password</label>
+        <br>
+        <input type="password" name="password" placeholder="" value="{{ request.form['password'] }}"></input>
+        <br>
+
+        <label for="title">Password Confirmation</label>
+        <br>
+        <input type="password" name="password_confirm" placeholder="" value="{{ request.form['password_confirm'] }}"></input>
+        <br>
+
+        <label for="title">Email Address</label>
+        <br>
+        <input type="text" name="email" placeholder="" value="{{ request.form['email'] }}"></input>
+        <br>
+
+        <br>
+        <button type="submit">Submit</button>
+    </form>
+{% endblock %}

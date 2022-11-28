@@ -23,3 +23,4 @@ Here is my sample website that taught me how to use the following concepts:
   - Creating Records
   - Updating Records
   - Deleting Records
+- Hashing and Verifying Passwords
